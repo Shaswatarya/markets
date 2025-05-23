@@ -1,0 +1,616 @@
+"Real Canadian Superstore"
+
+import pandas as pd
+import os
+from datetime import date
+import time
+import multiprocessing
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from config import *
+
+
+def scrape_product_data(driver, category, product):
+    scraped_rows = []
+    product_elements = driver.find_elements(By.XPATH, "//div[@class='css-qoklea']")
+    for product_element in product_elements:
+        try:
+            item_flag = product_element.find_element(By.XPATH,
+                                                     ".//div[@class='css-1jkwq69']").text
+        except:
+            item_flag = "N/A"
+        try:
+            id = product_element.find_element(By.XPATH,
+                                              ".//h3[@class='chakra-heading css-6qrhwc']")
+            product_id = id.get_attribute("id")
+        except:
+            product_id = "N/A"
+        try:
+            brand = product_element.find_element(By.XPATH,
+                                                 ".//p[@class='chakra-text css-1ecdp9w']").text
+        except:
+            brand = "N/A"
+        try:
+            name = product_element.find_element(By.XPATH,
+                                                ".//h3[@class='chakra-heading css-6qrhwc']").text
+        except:
+            name = "N/A"
+
+        New_name = brand + ' - ' + name
+        Product_name = New_name.replace("N/A - ", "")
+        try:
+            size = product_element.find_element(By.XPATH,
+                                                ".//p[@class='chakra-text css-1yftjin']").text
+        except:
+            size = "N/A"
+        size_unit_arrya = size.split(',')
+        item = "N/A"
+        number = "N/A"
+        if len(size_unit_arrya) == 2:
+            size = size_unit_arrya[0]
+            unit = size_unit_arrya[1]
+        try:
+            price = product_element.find_element(By.XPATH,
+                                                 ".//span[@class='chakra-text css-pwnbcb']").text
+        except:
+            price = "N/A"
+        price = price.replace('about', '')
+        try:
+            sale_price = product_element.find_element(By.XPATH,
+                                                      ".//span[@class='chakra-text css-o93gbd']").text
+        except:
+            sale_price = "N/A"
+
+        # static values
+        segment_flag = 'General'
+        region_name = "British Columbia"
+        region_abbreviation = "BC"
+        location_name = "Vancouver"
+        syscos_opsite_number = '044'
+        competitor_name = "Real Canadian Superstore"
+
+        # schema variable mapping
+        sysco_categoory = category
+        competitors_product_type = product
+        brand = brand
+        product_name = name
+        item_number = product_id
+        item_flag = item_flag
+        size = size,
+        unit = unit,
+        initial_price = price
+        available_discount = sale_price
+
+        # standard schema
+        regular_schema_data = [segment_flag, region_name, region_abbreviation, location_name, syscos_opsite_number,
+                               competitor_name, comp_code, sysco_categoory, sysco_category_number, attribute_group,
+                               competitors_product_type, product_type_code, brand, product_name, item_number, item_flag,
+                               size, unit, initial_price, alternative_size, alternate_price, available_discount,
+                               fiscal_year, fiscal_period, fiscal_week,
+                               free_col_1, free_col_2, free_col_3, free_col_4, free_col_5, free_col_6, free_col_7,
+                               free_col_8, free_col_9, free_col_10,
+                               free_col_11, free_col_12, free_col_13, free_col_14, free_col_15, free_col_16,
+                               free_col_17, free_col_18, free_col_19, free_col_20, inserted_date]
+
+        scraped_row = regular_schema_data
+        scraped_rows.append(scraped_row)
+
+    return scraped_rows
+
+def rcs_data(category, product_dict, is_headless=False):
+    product_data = []
+    if is_headless:
+        chrome_options = Options()
+        chrome_options.add_argument("--headless")
+
+        driver = webdriver.Chrome(options=chrome_options)
+    else:
+        driver = webdriver.Chrome()
+
+    driver.get("https://www.nofrills.ca/en/store-locator?type=store&icta=pickup-details-modal")
+    time.sleep(15)
+    driver.maximize_window()
+    try:
+        feedbackform = driver.find_element(By.XPATH, ".//button[@id='onetrust-accept-btn-handler']").click
+    except:
+        pass
+    time.sleep(10)
+    location_search = driver.find_element(By.XPATH, "//input[@id='location-search__search__input']")
+    time.sleep(15)
+    location_search.send_keys("Vancouver")
+    location_search.send_keys(Keys.ENTER)
+    time.sleep(10)
+    select_location = driver.find_element(By.XPATH,
+                                          "//button[@class ='location-set-store__button location-set-store__button--is-not-current-location location-set-store__button--is-shoppable location-set-store__button--is-store location-set-store__button--is-not-this-banner']")
+    select_location.click()
+    time.sleep(5)
+    continue_shopping = driver.find_element(By.XPATH,
+                                            "//a[@class='fulfillment-location-confirmation__actions__button']")
+    continue_shopping.click()
+    time.sleep(20)
+
+    for product, url_suffix in product_dict.items():
+        driver.get("https://www.realcanadiansuperstore.ca/en/" + url_suffix)
+        time.sleep(20)
+        part_product_data = scrape_product_data(driver, category, product)
+        product_data.extend(part_product_data)
+        time.sleep(5)
+        page_next = True
+        for i in range(3):
+            try:
+                driver.find_element(By.XPATH, ".//a[@class='chakra-link css-1vwc5vj']").click()
+                time.sleep(5)
+                part_product_data = scrape_product_data(driver, category, product)
+                product_data.extend(part_product_data)
+
+            except:
+                page_next = False
+                break
+    driver.close()
+    return product_data
+
+def main():
+    product_dict = {
+        # "Meat": {
+        #     "Fresh Sausages": "food/meat/sausages/fresh-sausages/c/56935",
+        #     "Frozen Sausages": "food/meat/sausages/frozen-sausages/c/56940",
+        #     "Cooked Sausages": "food/meat/sausages/cooked-sausages/c/56942",
+        #     "Fresh Lamb": "food/meat/lamb-veal/fresh-lamb-veal/c/56955",
+        #     "Frozen Lamb": "food/meat/beef/c/28174",
+        #     "Kebab & Marinated Meat": "food/meat/kebabs-marinated-meat/c/28173",
+        #     "Beef & Steak": "food/meat/beef/beef-steaks-roasts/c/29651",
+        #     "Fresh Beef": "food/meat/beef/fresh-ground-beef-patties/c/29766",
+        #     "Frozen Meatballs": "food/meat/beef/frozen-meatballs/c/56952",
+        #     "Frozen Burgers": "food/meat/beef/frozen-burgers/c/56953",
+        #     "Pork & Ham": "food/meat/pork-ham/c/28215",
+        #     "Bacon": "food/meat/bacon/c/59252",
+        #     "Hot Dogs": "food/meat/hot-dogs/c/59253",
+        #     "Halal Meat": "food/meat/halal-meat/c/59257",
+        #     "Deli Meat": "food/meat/deli-meat/c/59319"
+        # },
+        "Poultry": {
+            "Chicken Breast": "food/meat/chicken-turkey/chicken-breasts/c/29768",
+        #     "Chicken Legs,Drumsticks&Thighs ": "food/meat/chicken-turkey/chicken-legs-thighs-drumsticks/c/34541",
+        #     "Whole Chicken": "food/meat/chicken-turkey/whole-chicken-turkey/c/34543",
+        #     "Frozen Chicken Strips & Nuggets": "food/meat/chicken-turkey/frozen-chicken-strips-nuggets/c/56971",
+        #     "Sp.Halal": "food/meat/chicken-turkey/halal/c/58577",
+        #     "Chicken Wings": "food/meat/chicken-turkey/chicken-wings/c/59357",
+        #     "Other Frozen ": "food/frozen-food/frozen-meat-seafood/frozen-chicken-turkey/c/29869"
+        },
+        # "Seafood": {
+        #     "Shellfish": "food/fish-seafood/shellfish/c/28190",
+        #     "Fish": "food/fish-seafood/fish/c/28191",
+        #     "Seafood Appetizers": "food/fish-seafood/seafood-appetizers/c/28192",
+        #     "Squid & Octopus": "food/fish-seafood/squid-octopus/c/28193",
+        #     "Salmon": "food/fish-seafood/salmon/c/28217",
+        #     "Shrimp": "food/fish-seafood/shrimp/c/28218"
+        #     "Frozen": "food/frozen-food/frozen-meat-seafood/frozen-fish-seafood/c/29874"
+        # },
+        "Canned & Dry": {
+            "Buns & Rolls": "food/bakery/buns-rolls/c/28147",
+            # "Cookies,Muffins & Desserts": "food/bakery/cookies-muffins-desserts/c/28148",
+            # "Bagel & Croissants": "food/bakery/bagels-croissants-english-muffins/c/28149",
+            # "Wraps & Flatbread": "food/wraps-flatbread-pizza-crust/c/28150",
+            # "Breads": "food/bakery/bread/c/28251",
+            # "Cakes": "food/bakery/cakes/c/59494",
+            # "Syrups,Honey & Spreads": "food/pantry/honey-syrups-spreads/c/28184",
+            # "Cereals & Other": "food/pantry/cereal-breakfast/c/28183?sort=price-desc&page=1",
+            # "Dried Beans": "food/pantry/dried-beans-vegetables-grains/c/28185",
+            # "Flour": "food/pantry/baking-essentials/flours/c/29695",
+            # "Sugar": "food/pantry/baking-essentials/sugar-sweetener/c/29878",
+            # "Nuts & Dried Fruits": "food/pantry/baking-essentials/nuts-dried-fruits/c/29880",
+            # "Baking Mixes": "food/pantry/baking-essentials/mixes/c/29875",
+            # "Cocoa & Others": "food/pantry/baking-essentials/chocolate-cocoa/c/29877",
+            # "Baking Soda & Others": "food/pantry/baking-essentials/baking-soda-powder-yeast/c/29696",
+            # "Canned Foods": "food/pantry/c/28006",
+            # "Candy & Nuts": "food/pantry/bulk-nuts-and-candy/c/57088",
+            # "Rice": "food/pantry/rice/c/28248",
+            # "Pasta & Pasta Sauces": "food/pantry/pasta-pasta-sauce/c/28247",
+            # "Sides & Easy Meals": "food/pantry/easy-meals-sides/c/28246",
+            # "Condiments": "food/pantry/baking-essentials/baking-soda-powder-yeast/c/29696",
+            # "Oil & Vinegar": "food/pantry/oils-vinegar/c/28244",
+            # "Condiments & Sauces": "food/pantry/condiments-sauces/c/28243",
+            # "Spices & Seasoning": "food/pantry/spices-seasonings/c/28188"
+        },
+        # "Produce": {
+        #     "Fresh Fruits": "food/fruits-vegetables/fresh-fruits/c/28194",
+        #     "Fresh Veges": "food/fruits-vegetables/fresh-vegetables/c/28195",
+        #     "Packaged Salad": "food/fruits-vegetables/packaged-salad-dressing/c/28196",
+        #     "Dried Fruits & Nuts": "food/fruits-vegetables/dried-fruits-nuts/c/28199"
+        # },
+        # "Beverages": {
+        #     "Juice": "food/bakery/buns-rolls/c/28147",
+        #     "Soft Drinks": "food/drinks/soft-drinks/c/28231",
+        #     "Non-Dairy Alternatives": "food/drinks/non-dairy-milk-alternatives/c/28232",
+        #     "Sports Drink": "food/drinks/sports-energy/c/28233",
+        #     "Tea & Hot Drinks": "food/drinks/tea-hot-drinks/c/28234",
+        #     "Water": "food/drinks/water/c/28235",
+        #     "Non-Alcoholic Drinks": "food/drinks/non-alcoholic-drinks/c/29718"
+        # },
+        # "Frozen": {
+        #     "Fruits & Veges" : "food/frozen-food/frozen-fruit-vegetables/c/28162",
+        #     "Potato Products": "food/frozen-food/meals-entrees-sides/potatoes/c/29620",
+        #     "Perogies & Pasta": "food/frozen-food/meals-entrees-sides/pasta-perogies/c/29621",
+        #     "Meals": "food/frozen-food/meals-entrees-sides/meals/c/29868",
+        #     "Breakfast & Bakrey" : "food/frozen-food/bakery-breakfast/c/28164",
+        #     "Pizza": "food/frozen-food/frozen-pizza/c/28165",
+        #     "Appetizers & Snacks": "food/frozen-food/appetizers-snacks/c/28238",
+        #     "Frozen Beverages": "food/frozen-food/beverages-ice/c/28239",
+        #     "IceCream & Deserts": "food/frozen-food/ice-cream-desserts/c/28240",
+        #     "Breakfast & Bakrey" : "food/frozen-food/bakery-breakfast/c/28164",
+        #     "Pizza": "food/frozen-food/frozen-pizza/c/28165",
+        #     "Appetizers & Snacks": "food/frozen-food/appetizers-snacks/c/28238",
+        #     "Frozen Beverages": "food/frozen-food/beverages-ice/c/28239"
+        # },
+        #
+        # "Chemicals": {
+        #     "Laundry": "home-and-living/household-cleaning-products/laundry-needs/c/28305?navid=flyout-L3-Laundry-Needs",
+        #     "Gloves & Others": "household-supplies/cleaning-accessories-sponges/c/39932?navid=flyout-L3-cleaning-accessories-sponges"
+        # },
+        # "Paper & Disposables": {
+        #     "Napkins": "home-kitchen/dining-entertaining/napkins/c/59361",
+        #     "Disposables": "home-kitchen/dining-entertaining/disposables/c/30590",
+        #     "Wraps & Bags": "home-and-living/household-cleaning-products/food-wrap-bags/c/28180?navid=flyout-L3-Food-Wrap-and-Bags",
+        #     "Paper & Tissue": "home-and-living/household-cleaning-products/paper-products-/c/28175?navid=flyout-L3-Bathroom-Tissues-Paper-Products",
+        #     "Garbage": "home-and-living/household-cleaning-products/trash-bags/c/28306?navid=flyout-L3-Trash-Bags",
+
+        # }
+
+    }
+
+    #combining the category data into one
+    scraped_data = []
+    for category, items in product_dict.items():
+        category_data = rcs_data(category, items)
+        scraped_data.extend(category_data)
+    scraped_data = pd.DataFrame(scraped_data , columns= regular_schema_data)
+
+    #processing
+    import common_v6
+    import datetime
+    file_path =  f'{str(datetime.date.today())}/reg2/Real Canadian Superstore.xlsx'
+    try:
+        creds = common_v6.get_config()
+        store_data = common_v6.filler(scraped_data , creds)
+        #common_v6.save_to_pg(store_data , creds)
+        common_v6.save_to_excel( store_data , file_path)
+    except Exception as e:
+        print(f"Issue with data filler or insertion insertion or save to file refer expection ::  {e}" )
+
+import traceback
+try:
+    if __name__ == '__main__':
+        start = time.time()
+        main()
+        end = time.time()
+        print(f"Execution time: {end - start:.2f} seconds")
+except Exception as e:
+    print(f"Job failed with Exception :: {e}")
+    traceback.print_exc()
+
+"""Real Canadian Promotion"""
+
+import pandas as pd
+from selenium import webdriver
+import os
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import *
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+import time
+from datetime import date
+from config import *
+
+def rcs_promo(is_headless=False):
+    scrap_data = []
+
+    if is_headless:
+        chrome_options = Options()
+        chrome_options.add_argument("--headless")
+        driver = webdriver.Chrome(options=chrome_options)
+    else:
+        driver = webdriver.Chrome()
+
+    driver.get("https://www.realcanadiansuperstore.ca/en/deals/all?navid=flyout-L2-All-Deals")
+    driver.maximize_window()
+    time.sleep(20)
+    cookie = driver.find_element(By.XPATH, "//button[@id='onetrust-accept-btn-handler']")
+    cookie.click()
+    Sort = driver.find_element(By.XPATH, "//button[@class='styled-dropdown__selected-item-link styled-dropdown__selected-item-link--filter']")
+    Sort.click()
+    time.sleep(10)
+    h2l = driver.find_element(By.XPATH, "//button[@data-option-value='price-desc']")
+    h2l.click()
+    time.sleep(4)
+    aisle = driver.find_element(By.XPATH, "//button[@class='filter-group-list-item__list__item__button']")
+    aisle.click()
+    driver.execute_script("window.scrollTo(0, 12000);")
+    time.sleep(6)
+    driver.execute_script("window.scrollTo(12000, 20000);")
+    time.sleep(4)
+    driver.execute_script("window.scrollTo(20000, 25000);")
+    time.sleep(6)
+    driver.execute_script("window.scrollTo(25000, 35000);")
+    time.sleep(8)
+    product_elements = driver.find_elements(By.XPATH, "//div[@class='product-tracking']")
+    for product_element in product_elements:
+        try:
+            product_id = product_element.get_attribute("data-track-product-id")
+        except:
+            product_id = "N/A"
+        try:
+            deal = "Yes"
+        except:
+            pass
+        try:
+            brand = product_element.find_element(By.XPATH,
+                                                 ".//span[@class='product-name__item product-name__item--brand']").text
+        except:
+            brand = "N/A"
+        try:
+            name = product_element.find_element(By.XPATH,
+                                                ".//span[@class='product-name__item product-name__item--name']").text
+        except:
+            name = "N/A"
+
+        New_name = brand + ' - ' + name
+        Product_name = New_name.replace("N/A - ", "")
+        try:
+            size = product_element.find_element(By.XPATH,
+                                                ".//span[@class='product-name__item product-name__item--package-size']").text
+        except:
+            size = "N/A"
+        try:
+            price = product_element.find_element(By.XPATH,
+                                                 ".//span[@class='price__value selling-price-list__item__price selling-price-list__item__price--sale__value']").text
+        except:
+            price = "N/A"
+        try:
+            price2 = product_element.find_element(By.XPATH,
+                                                  ".//span[@class='price__value selling-price-list__item__price selling-price-list__item__price--now-price__value']").text
+        except:
+            price2 = "N/A"
+        try:
+            unit = product_element.find_element(By.XPATH,
+                                                ".//span[@class='price__unit comparison-price-list__item__price__unit']").text
+        except:
+            unit = "N/A"
+
+        try:
+            promo_detail = product_element.find_element(By.XPATH,
+                                                        ".//div[@class='product-badge__text product-badge__text--product-tile']").text
+        except:
+            promo_detail = "N/A"
+
+        try:
+            promo_date = product_element.find_element(By.XPATH,
+                                                        ".//div[@class='product-badge__icon__expiry product-badge__icon__expiry--sale']").text
+        except:
+            promo_date = "N/A"
+
+        #static
+        segment_flag = 'General'
+        region_name = "British Columbia"
+        region_abbreviation = "BC" 
+        location_name = "Vancouver" 
+        syscos_opsite_number = '044'
+        competitor_name = "No Frills Promo"
+
+        #dynamic
+        brand = brand
+        product_name = name
+        item_number = product_id
+        item_flag = item_flag
+        size = size
+        unit = unit
+        initial_price = price
+        discount = ''
+        discounted_price = price2
+        promo_type = promo_type
+        promo_date = promo_date
+        promo_detail = promo_detail
+
+        promo_schema_data = [segment_flag,region_name,region_abbreviation,location_name,syscos_opsite_number,competitor_name,comp_code,attribute_group,brand,product_name,item_number,item_flag,size,unit,initial_price,discount,discounted_price,each_size,each_price,promo_type,promo_date,promo_detail,fiscal_year,fiscal_period,fiscal_week,
+        free_col_1,free_col_2,free_col_3,free_col_4,free_col_5,free_col_6,free_col_7,free_col_8,free_col_9,free_col_10,free_col_11,free_col_12,free_col_13,free_col_14,free_col_15,free_col_16,free_col_17,free_col_18,free_col_19,free_col_20,inserted_date]
+
+        scraped_row_updated = promo_schema_data
+        scrap_data.append(scraped_row_updated)
+
+    driver.close()
+    return scrap_data
+
+
+def main():
+
+    store_data_df = pd.DataFrame(data= rcs_promo(), columns=promo_schema)
+
+    import datetime
+    import common_v6
+    file_path =  f'{str(datetime.date.today())}/reg2_promo/Real Canadian Superstore Promo.xlsx'
+    
+    try:
+        creds = common_v6.get_config()
+        store_data = common_v6.promo_filler(store_data_df , creds)
+        common_v6.save_to_pg_promo(store_data , creds)
+        common_v6.save_to_excel( store_data , file_path)
+    except:
+        print(f"Issue with filler or database insertion or save to file refer expection :: {e}" )
+
+import traceback
+try:
+    if __name__ == '__main__':
+        start = time.time()
+        main()
+        end = time.time()
+        print(f"Execution time: {end - start:.2f} seconds")
+except Exception as e:
+    print(f"Job failed with Exception :: {e}")
+    traceback.print_exc()
+
+"""No Frills Promotion"""
+
+import pandas as pd
+from selenium import webdriver
+import os
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import *
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+import time
+from datetime import date
+from config import *
+
+def nofrills_promo(is_headless=False):
+    scrap_data = []
+
+    if is_headless:
+        chrome_options = Options()
+        chrome_options.add_argument("--headless")
+        driver = webdriver.Chrome(options=chrome_options)
+    else:
+        driver = webdriver.Chrome()
+
+    driver.get("https://www.nofrills.ca/en/deals/all?navid=flyout-L2-All-Deals")
+    driver.maximize_window()
+    time.sleep(20)
+    cookie = driver.find_element(By.XPATH, "//button[@id='onetrust-accept-btn-handler']")
+    cookie.click()
+
+    Sort = driver.find_element(By.XPATH, "//button[@class='styled-dropdown__selected-item-link styled-dropdown__selected-item-link--filter']")
+    Sort.click()
+    time.sleep(10)
+    h2l = driver.find_element(By.XPATH, "//button[@data-option-value='price-desc']")
+    h2l.click()
+    time.sleep(4)
+    aisle = driver.find_element(By.XPATH, "//button[@class='filter-group-list-item__list__item__button']")
+    aisle.click()
+    driver.execute_script("window.scrollTo(0, 12000);")
+    time.sleep(6)
+    driver.execute_script("window.scrollTo(12000, 20000);")
+    time.sleep(4)
+    driver.execute_script("window.scrollTo(20000, 25000);")
+    time.sleep(6)
+    driver.execute_script("window.scrollTo(25000, 35000);")
+    time.sleep(8)
+    product_elements = driver.find_elements(By.XPATH, "//div[@class='product-tracking']")
+    for product_element in product_elements:
+        try:
+            product_id = product_element.get_attribute("data-track-product-id")
+        except:
+            product_id = "N/A"
+        try:
+            deal = "Yes"
+        except:
+            pass
+        try:
+            brand = product_element.find_element(By.XPATH,
+                                                 ".//span[@class='product-name__item product-name__item--brand']").text
+        except:
+            brand = "N/A"
+        try:
+            name = product_element.find_element(By.XPATH,
+                                                ".//span[@class='product-name__item product-name__item--name']").text
+        except:
+            name = "N/A"
+
+        New_name = brand + ' - ' + name
+        Product_name = New_name.replace("N/A - ", "")
+        try:
+            size = product_element.find_element(By.XPATH,
+                                                ".//span[@class='product-name__item product-name__item--package-size']").text
+        except:
+            size = "N/A"
+        try:
+            price = product_element.find_element(By.XPATH,
+                                                 ".//span[@class='price__value selling-price-list__item__price selling-price-list__item__price--sale__value']").text
+        except:
+            price = "N/A"
+        try:
+            price2 = product_element.find_element(By.XPATH,
+                                                  ".//span[@class='price__value selling-price-list__item__price selling-price-list__item__price--now-price__value']").text
+        except:
+            price2 = "N/A"
+        try:
+            unit = product_element.find_element(By.XPATH,
+                                                ".//span[@class='price__unit comparison-price-list__item__price__unit']").text
+        except:
+            unit = "N/A"
+
+        try:
+            promo_detail = product_element.find_element(By.XPATH,
+                                                        ".//div[@class='product-badge__text product-badge__text--product-tile']").text
+        except:
+            promo_detail = "N/A"
+
+        try:
+            promo_date = product_element.find_element(By.XPATH,
+                                                        ".//div[@class='product-badge__icon__expiry product-badge__icon__expiry--sale']").text
+        except:
+            promo_date = "N/A"
+
+        #static
+        segment_flag = 'General'
+        region_name = "British Columbia"
+        region_abbreviation = "BC" 
+        location_name = "Vancouver" 
+        syscos_opsite_number = '044'
+        competitor_name = "No Frills Promo"
+
+        #dynamic
+        brand = brand
+        product_name = name
+        item_number = product_id
+        item_flag = item_flag
+        size = size
+        unit = unit
+        initial_price = price
+        discount = ''
+        discounted_price = price2
+        promo_type = promo_type
+        promo_date = promo_date
+        promo_detail = promo_detail
+
+        promo_schema_data = [segment_flag,region_name,region_abbreviation,location_name,syscos_opsite_number,competitor_name,comp_code,attribute_group,brand,product_name,item_number,item_flag,size,unit,initial_price,discount,discounted_price,each_size,each_price,promo_type,promo_date,promo_detail,fiscal_year,fiscal_period,fiscal_week,
+        free_col_1,free_col_2,free_col_3,free_col_4,free_col_5,free_col_6,free_col_7,free_col_8,free_col_9,free_col_10,free_col_11,free_col_12,free_col_13,free_col_14,free_col_15,free_col_16,free_col_17,free_col_18,free_col_19,free_col_20,inserted_date]
+
+        scraped_row_updated = promo_schema_data
+        scrap_data.append(scraped_row_updated)
+
+    driver.close()
+    return scrap_data
+
+
+def main():
+
+    store_data_df = pd.DataFrame(data=nofrills_promo(), columns=promo_schema)
+
+    import datetime
+    import common_v6
+    file_path =  f'{str(datetime.date.today())}/reg2_promo/No Frills Promo.xlsx'
+    
+    try:
+        creds = common_v6.get_config()
+        store_data = common_v6.promo_filler(store_data_df , creds)
+        common_v6.save_to_pg_promo(store_data , creds)
+        common_v6.save_to_excel( store_data , file_path)
+    except:
+        print(f"Issue with filler or database insertion or save to file refer expection :: {e}" )
+
+import traceback
+try:
+    if __name__ == '__main__':
+        start = time.time()
+        main()
+        end = time.time()
+        print(f"Execution time: {end - start:.2f} seconds")
+except Exception as e:
+    print(f"Job failed with Exception :: {e}")
+    traceback.print_exc()
+
+
